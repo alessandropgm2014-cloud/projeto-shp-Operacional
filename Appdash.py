@@ -2,15 +2,24 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import time
+import pytz
 
 st.set_page_config(page_title="Painel Operacional - LMG 19", layout="wide", page_icon="📈")
+
+# ── Inicializa session_state ─────────────────────────────
+if "aba_atual" not in st.session_state:
+    st.session_state.aba_atual = 0
+if "apresentacao_ativa" not in st.session_state:
+    st.session_state.apresentacao_ativa = False
 
 # ── Cabeçalho com data e hora ────────────────────────────
 col_titulo, col_hora = st.columns([3, 1])
 with col_titulo:
     st.title("📊 Painel Operacional")
 with col_hora:
-    agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    fuso_brasilia = pytz.timezone("America/Sao_Paulo")
+    agora = datetime.now(fuso_brasilia).strftime("%d/%m/%Y %H:%M")
     st.markdown(f"""
     <div style="text-align:right; padding-top:20px; color:#888; font-size:14px;">
         🕐 Atualizado em<br><b style="color:#ccc">{agora}</b>
@@ -38,6 +47,28 @@ with st.sidebar:
 
     st.divider()
 
+    # ── Controle de Apresentação ─────────────────────────
+    st.markdown("**🎬 Modo Apresentação**")
+
+    intervalo = st.slider("Intervalo entre abas (s)", min_value=5, max_value=60, value=15, step=5)
+
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("▶ Iniciar", use_container_width=True, type="primary"):
+            st.session_state.apresentacao_ativa = True
+    with col_btn2:
+        if st.button("⏹ Parar", use_container_width=True):
+            st.session_state.apresentacao_ativa = False
+
+    if st.session_state.apresentacao_ativa:
+        abas_nomes = ["📦 Produção hora a hora", "🔍 Auditoria por Operador"]
+        aba_exibindo = abas_nomes[st.session_state.aba_atual]
+        st.success(f"🟢 Ativo — {aba_exibindo}")
+    else:
+        st.caption("🔴 Apresentação pausada")
+
+    st.divider()
+
     # ── Legenda mapa de calor ────────────────────────────
     st.markdown("**🎨 Legenda — Produção/Hora**")
     st.markdown("""
@@ -61,13 +92,27 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-# ── Abas ─────────────────────────────────────────────────
-aba1, aba2 = st.tabs(["📦 Produção hora a hora", "🔍 Auditoria por Operador"])
+# ── Navegação manual entre abas (botões) ─────────────────
+ABAS = ["📦 Produção hora a hora", "🔍 Auditoria por Operador"]
+
+col_nav1, col_nav2, col_spacer = st.columns([2, 2, 6])
+with col_nav1:
+    if st.button(ABAS[0], use_container_width=True,
+                 type="primary" if st.session_state.aba_atual == 0 else "secondary"):
+        st.session_state.aba_atual = 0
+        st.session_state.apresentacao_ativa = False
+with col_nav2:
+    if st.button(ABAS[1], use_container_width=True,
+                 type="primary" if st.session_state.aba_atual == 1 else "secondary"):
+        st.session_state.aba_atual = 1
+        st.session_state.apresentacao_ativa = False
+
+st.divider()
 
 # ════════════════════════════════════════════════════════
 # ABA 1 — PRODUÇÃO
 # ════════════════════════════════════════════════════════
-with aba1:
+if st.session_state.aba_atual == 0:
     if uploaded_prod is not None:
         df = pd.read_csv(uploaded_prod)
 
@@ -153,7 +198,7 @@ with aba1:
 # ════════════════════════════════════════════════════════
 # ABA 2 — AUDITORIA
 # ════════════════════════════════════════════════════════
-with aba2:
+elif st.session_state.aba_atual == 1:
     if uploaded_audit is not None:
         df2 = pd.read_csv(uploaded_audit)
 
@@ -177,7 +222,6 @@ with aba2:
 
         df_audit['% Processado'] = (df_audit['Pacotes'] / total_pacotes * 100).round(0).astype(int).astype(str) + '%'
 
-        # Calcular ociosidade real entre rotas
         df2 = df2.sort_values(['Nome', 'Start'])
         df2['Prox_Start'] = df2.groupby('Nome')['Start'].shift(-1)
         df2['Ociosidade_seg'] = (df2['Prox_Start'] - df2['End']).dt.total_seconds()
@@ -208,7 +252,6 @@ with aba2:
             except:
                 return ''
 
-        # ── Cartões de resumo ────────────────────────────────
         st.subheader("📋 Desempenhos - Auditoria")
 
         media_geral_seg = df2['Tempo_seg'].sum() / len(df2)
@@ -229,7 +272,6 @@ with aba2:
 
         st.divider()
 
-        # ── Top 3 Pódios ────────────────────────────────────
         st.subheader("🏆 Rankings")
 
         rank_col1, espaco, rank_col2 = st.columns([1, 0.1, 1])
@@ -292,7 +334,6 @@ with aba2:
                         """, unsafe_allow_html=True)
             df_audit = df_audit.drop(columns=['Média_seg'])
 
-        # ── Tabela detalhada ─────────────────────────────────
         st.divider()
         st.subheader("📋 Performance da Equipe")
         df_exibir = df_audit.drop(columns=['Média_seg'], errors='ignore')
@@ -301,3 +342,9 @@ with aba2:
 
     else:
         st.info("👆 Faça o upload do CSV do Audit na barra lateral.")
+
+# ── Auto-avanço de abas ──────────────────────────────────
+if st.session_state.apresentacao_ativa:
+    time.sleep(intervalo)
+    st.session_state.aba_atual = (st.session_state.aba_atual + 1) % len(ABAS)
+    st.rerun()
