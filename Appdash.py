@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import time
-import pytz
 
 st.set_page_config(page_title="Painel Operacional - LMG 19", layout="wide", page_icon="📈")
 
@@ -18,7 +17,7 @@ col_titulo, col_hora = st.columns([3, 1])
 with col_titulo:
     st.title("📊 Painel Operacional")
 with col_hora:
-    fuso_brasilia = pytz.timezone("America/Sao_Paulo")
+    fuso_brasilia = timezone(timedelta(hours=-3))
     agora = datetime.now(fuso_brasilia).strftime("%d/%m/%Y %H:%M")
     st.markdown(f"""
     <div style="text-align:right; padding-top:20px; color:#888; font-size:14px;">
