@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timezone, timedelta
 import time
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Painel Operacional - LMG 19", layout="wide", page_icon="📈")
 
@@ -24,6 +26,24 @@ with col_hora:
         🕐 Atualizado em<br><b style="color:#ccc">{agora}</b>
     </div>
     """, unsafe_allow_html=True)
+
+# ── Função de conexão Google Sheets ─────────────────────
+@st.cache_data(ttl=300)
+def carregar_indicadores():
+    try:
+        SCOPES = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+        client = gspread.authorize(creds)
+        planilha = client.open_by_key('1TAe_Bgqhjw_o8-xUHqE0T1CCPkymEMSugoSQCkuGP_0')
+        aba = planilha.sheet1
+        dados = aba.get_all_records()
+        df = pd.DataFrame(dados)
+        df.columns = df.columns.str.strip()
+        df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
+        df = df.dropna(subset=['Data'])
+        return df, None
+    except Exception as e:
+        return None, str(e)
 
 # ── Sidebar ─────────────────────────────────────────────
 with st.sidebar:
@@ -48,7 +68,6 @@ with st.sidebar:
 
     # ── Controle de Apresentação ─────────────────────────
     st.markdown("**🎬 Modo Apresentação**")
-
     intervalo = st.slider("Intervalo entre abas (s)", min_value=5, max_value=60, value=15, step=5)
 
     col_btn1, col_btn2 = st.columns(2)
@@ -60,7 +79,7 @@ with st.sidebar:
             st.session_state.apresentacao_ativa = False
 
     if st.session_state.apresentacao_ativa:
-        abas_nomes = ["📦 Produção hora a hora", "🔍 Auditoria por Operador"]
+        abas_nomes = ["📦 Produção hora a hora", "🔍 Auditoria por Operador", "📊 Indicadores Operacionais"]
         aba_exibindo = abas_nomes[st.session_state.aba_atual]
         st.success(f"🟢 Ativo — {aba_exibindo}")
     else:
@@ -92,9 +111,9 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # ── Navegação manual entre abas (botões) ─────────────────
-ABAS = ["📦 Produção hora a hora", "🔍 Auditoria por Operador"]
+ABAS = ["📦 Produção hora a hora", "🔍 Auditoria por Operador", "📊 Indicadores Operacionais"]
 
-col_nav1, col_nav2, col_spacer = st.columns([2, 2, 6])
+col_nav1, col_nav2, col_nav3 = st.columns(3)
 with col_nav1:
     if st.button(ABAS[0], use_container_width=True,
                  type="primary" if st.session_state.aba_atual == 0 else "secondary"):
@@ -104,6 +123,11 @@ with col_nav2:
     if st.button(ABAS[1], use_container_width=True,
                  type="primary" if st.session_state.aba_atual == 1 else "secondary"):
         st.session_state.aba_atual = 1
+        st.session_state.apresentacao_ativa = False
+with col_nav3:
+    if st.button(ABAS[2], use_container_width=True,
+                 type="primary" if st.session_state.aba_atual == 2 else "secondary"):
+        st.session_state.aba_atual = 2
         st.session_state.apresentacao_ativa = False
 
 st.divider()
@@ -163,7 +187,6 @@ if st.session_state.aba_atual == 0:
         st.subheader("📋 Produção hora a hora por operador")
         st.dataframe(styled, use_container_width=True, hide_index=True)
 
-        # Pódio
         st.subheader("🏆 Top 3 Operadores")
         top3 = df_final.nlargest(3, 'Total').reset_index(drop=True)
         col2, col1, col3 = st.columns(3)
@@ -202,7 +225,6 @@ elif st.session_state.aba_atual == 1:
         df2 = pd.read_csv(uploaded_audit)
 
         df2['Nome'] = df2['Validation Operator'].str.replace(r'\[.*?\]', '', regex=True).str.strip().str.title()
-
         df2['Start'] = pd.to_datetime(df2['Validation Start Time'])
         df2['End'] = pd.to_datetime(df2['Validation End Time'])
         df2['Tempo_seg'] = (df2['End'] - df2['Start']).dt.total_seconds()
@@ -234,7 +256,6 @@ elif st.session_state.aba_atual == 1:
             df_audit['Media_Oci_seg'].fillna(0), unit='s'
         ).dt.strftime('%M:%S')
         df_audit = df_audit.drop(columns=['Media_Oci_seg'])
-
         df_audit = df_audit[['Nome', 'Pacotes', 'Rotas', 'Média', '% Processado', 'Média Ociosidade']]
         df_audit = df_audit.sort_values('Pacotes', ascending=False).reset_index(drop=True)
 
@@ -255,10 +276,8 @@ elif st.session_state.aba_atual == 1:
 
         media_geral_seg = df2['Tempo_seg'].sum() / len(df2)
         media_geral_fmt = f"{int(media_geral_seg // 60):02d}:{int(media_geral_seg % 60):02d}"
-
         oci_geral_seg = df2['Ociosidade_seg'].mean()
         oci_geral_fmt = f"{int(oci_geral_seg // 60):02d}:{int(oci_geral_seg % 60):02d}"
-
         total_revalidacoes = int(df2['Revalidated Count'].sum())
 
         c1, c2, c3 = st.columns(3)
@@ -270,11 +289,9 @@ elif st.session_state.aba_atual == 1:
             st.metric(label="🔁 Total de Reconferências", value=total_revalidacoes)
 
         st.divider()
-
         st.subheader("🏆 Rankings")
 
         rank_col1, espaco, rank_col2 = st.columns([1, 0.1, 1])
-
         config_rank = {
             0: {'medalha': '🥇', 'cor': '#FFD700', 'altura': '220px', 'fonte': '20px'},
             1: {'medalha': '🥈', 'cor': '#C0C0C0', 'altura': '180px', 'fonte': '17px'},
@@ -341,6 +358,145 @@ elif st.session_state.aba_atual == 1:
 
     else:
         st.info("👆 Faça o upload do CSV do Audit na barra lateral.")
+
+# ════════════════════════════════════════════════════════
+# ABA 3 — INDICADORES OPERACIONAIS (Google Sheets)
+# ════════════════════════════════════════════════════════
+elif st.session_state.aba_atual == 2:
+
+    # Nomes dos dias em português
+    DIAS_PT = {0: 'Segunda', 1: 'Terça', 2: 'Quarta', 3: 'Quinta', 4: 'Sexta', 5: 'Sábado', 6: 'Domingo'}
+
+    # Colunas de indicadores da planilha
+    COLUNAS_INDICADORES = [
+        'Line Haul - Qtd pacotes',
+        'Line Haul - Veículos',
+        'Roteirização - Qtd rotas',
+        'Processamento - Qtd pacotes',
+        'Processsamento - Missorting',
+        'Expedição - Qtd pacotes',
+        'Pessoas - Produtividade',
+        'Pessoas - Abs',
+        'Erros Processo',
+        'Reversa - RTS',
+        'Reversa - On Hold',
+        'Avarias',
+        'Lost',
+    ]
+
+    st.subheader("📊 Indicadores Operacionais — Semana Atual")
+
+    # Botão de atualizar
+    col_refresh, col_info = st.columns([1, 5])
+    with col_refresh:
+        if st.button("🔄 Atualizar dados", type="primary"):
+            st.cache_data.clear()
+
+    df_ind, erro = carregar_indicadores()
+
+    if erro:
+        st.error(f"❌ Erro ao conectar com Google Sheets: {erro}")
+    elif df_ind is None or df_ind.empty:
+        st.info("📋 Nenhum dado encontrado na planilha.")
+    else:
+        # Filtra semana atual (segunda a domingo)
+        hoje = datetime.now(timezone(timedelta(hours=-3))).date()
+        inicio_semana = hoje - timedelta(days=hoje.weekday())  # Segunda-feira
+        fim_semana = inicio_semana + timedelta(days=6)         # Domingo
+
+        df_semana = df_ind[
+            (df_ind['Data'].dt.date >= inicio_semana) &
+            (df_ind['Data'].dt.date <= fim_semana)
+        ].copy()
+
+        # Garante que só usa colunas que existem no dataframe
+        colunas_existentes = [c for c in COLUNAS_INDICADORES if c in df_ind.columns]
+
+        # ── Cards resumo da semana ───────────────────────
+        if not df_semana.empty:
+            st.markdown(f"**📅 Semana: {inicio_semana.strftime('%d/%m/%Y')} a {fim_semana.strftime('%d/%m/%Y')}**")
+            st.divider()
+
+            # Cards com totais da semana
+            cols_cards = st.columns(4)
+            cards_principais = [
+                ('Line Haul - Qtd pacotes', '📦 Line Haul', '#1a3a5c'),
+                ('Processamento - Qtd pacotes', '⚙️ Processamento', '#1a5c1a'),
+                ('Expedição - Qtd pacotes', '🚚 Expedição', '#5c3a1a'),
+                ('Erros Processo', '⚠️ Erros', '#5c1a1a'),
+            ]
+            for i, (col_nome, label, cor) in enumerate(cards_principais):
+                if col_nome in df_semana.columns:
+                    valor = pd.to_numeric(df_semana[col_nome], errors='coerce').sum()
+                    with cols_cards[i]:
+                        st.markdown(f"""
+                        <div style="background:{cor};border-radius:12px;padding:20px;text-align:center;
+                        box-shadow:0 4px 10px rgba(0,0,0,0.3);margin-bottom:16px;">
+                            <div style="font-size:14px;color:#aaa;margin-bottom:6px">{label}</div>
+                            <div style="font-size:32px;font-weight:bold;color:white">{int(valor):,}</div>
+                            <div style="font-size:11px;color:#aaa;margin-top:4px">total na semana</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+            st.divider()
+
+        # ── Tabela estilo Toyota por dia da semana ───────
+        st.markdown("**📋 Detalhamento por Dia da Semana**")
+
+        # Monta estrutura da tabela com todos os dias da semana
+        dias_semana = []
+        for i in range(6):  # Segunda a Sábado
+            dia = inicio_semana + timedelta(days=i)
+            dias_semana.append(dia)
+
+        linhas = []
+        for dia in dias_semana:
+            linha = {'Dia': DIAS_PT[dia.weekday()], 'Data': dia.strftime('%d/%m')}
+            dados_dia = df_semana[df_semana['Data'].dt.date == dia]
+            for col in colunas_existentes:
+                if not dados_dia.empty:
+                    val = pd.to_numeric(dados_dia[col], errors='coerce').sum()
+                    linha[col.strip()] = int(val) if val > 0 else '—'
+                else:
+                    linha[col.strip()] = '—'
+            linhas.append(linha)
+
+        # Linha de média semanal
+        linha_media = {'Dia': '📊 Média Semanal', 'Data': ''}
+        for col in colunas_existentes:
+            vals = pd.to_numeric(df_semana[col], errors='coerce')
+            dias_com_dados = (vals > 0).sum()
+            if dias_com_dados > 0:
+                linha_media[col.strip()] = round(vals.sum() / dias_com_dados, 1)
+            else:
+                linha_media[col.strip()] = '—'
+        linhas.append(linha_media)
+
+        df_tabela = pd.DataFrame(linhas)
+
+        # Estilo da tabela
+        def estilo_tabela(row):
+            if row['Dia'] == '📊 Média Semanal':
+                return ['background-color: #1a3a5c; color: white; font-weight: bold'] * len(row)
+            # Destaca o dia de hoje
+            hoje_fmt = hoje.strftime('%d/%m')
+            if row['Data'] == hoje_fmt:
+                return ['background-color: #2d4a1a; color: white'] * len(row)
+            return [''] * len(row)
+
+        styled_tabela = df_tabela.style.apply(estilo_tabela, axis=1)
+        st.dataframe(styled_tabela, use_container_width=True, hide_index=True)
+
+        st.caption("🟦 Média Semanal   🟩 Dia atual   — Sem dados")
+
+        # ── Histórico completo (expansível) ─────────────
+        st.divider()
+        with st.expander("📂 Ver histórico completo"):
+            df_hist = df_ind.copy()
+            df_hist['Data'] = df_hist['Data'].dt.strftime('%d/%m/%Y')
+            cols_hist = ['Data'] + colunas_existentes
+            df_hist = df_hist[cols_hist].sort_values('Data', ascending=False)
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
 # ── Auto-avanço de abas ──────────────────────────────────
 if st.session_state.apresentacao_ativa:
