@@ -367,6 +367,9 @@ elif st.session_state.aba_atual == 2:
     # Nomes dos dias em português
     DIAS_PT = {0: 'Segunda', 1: 'Terça', 2: 'Quarta', 3: 'Quinta', 4: 'Sexta', 5: 'Sábado', 6: 'Domingo'}
 
+    # Colunas que são percentuais na planilha
+    COLUNAS_PERCENTUAL = ['Pessoas - Abs', 'Erros Processo']
+
     # Colunas de indicadores da planilha
     COLUNAS_INDICADORES = [
         'Line Haul - Qtd pacotes',
@@ -423,7 +426,7 @@ elif st.session_state.aba_atual == 2:
                 ('Line Haul - Qtd pacotes', '📦 Line Haul', '#1a3a5c'),
                 ('Processamento - Qtd pacotes', '⚙️ Processamento', '#1a5c1a'),
                 ('Expedição - Qtd pacotes', '🚚 Expedição', '#5c3a1a'),
-                ('Erros Processo', '⚠️ Erros', '#5c1a1a'),
+                ('Lost', '💀 Lost', '#5c1a1a'),
             ]
             for i, (col_nome, label, cor) in enumerate(cards_principais):
                 if col_nome in df_semana.columns:
@@ -433,7 +436,7 @@ elif st.session_state.aba_atual == 2:
                         <div style="background:{cor};border-radius:12px;padding:20px;text-align:center;
                         box-shadow:0 4px 10px rgba(0,0,0,0.3);margin-bottom:16px;">
                             <div style="font-size:14px;color:#aaa;margin-bottom:6px">{label}</div>
-                            <div style="font-size:32px;font-weight:bold;color:white">{int(valor):,}</div>
+                            <div style="font-size:32px;font-weight:bold;color:white">{f'{int(valor):,}'.replace(',', '.')}</div>
                             <div style="font-size:11px;color:#aaa;margin-top:4px">total na semana</div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -456,7 +459,14 @@ elif st.session_state.aba_atual == 2:
             for col in colunas_existentes:
                 if not dados_dia.empty:
                     val = pd.to_numeric(dados_dia[col], errors='coerce').sum()
-                    linha[col.strip()] = int(val) if val > 0 else '—'
+                    import math
+                    if not math.isnan(val):
+                        if col in COLUNAS_PERCENTUAL:
+                            linha[col.strip()] = f"{val:.2f}%"
+                        else:
+                            linha[col.strip()] = int(val) if val == int(val) else round(val, 2)
+                    else:
+                        linha[col.strip()] = '—'
                 else:
                     linha[col.strip()] = '—'
             linhas.append(linha)
@@ -465,9 +475,17 @@ elif st.session_state.aba_atual == 2:
         linha_media = {'Dia': '📊 Média Semanal', 'Data': ''}
         for col in colunas_existentes:
             vals = pd.to_numeric(df_semana[col], errors='coerce')
-            dias_com_dados = (vals > 0).sum()
+            dias_com_dados = vals.notna().sum()
             if dias_com_dados > 0:
-                linha_media[col.strip()] = round(vals.sum() / dias_com_dados, 1)
+                media = round(vals.sum() / dias_com_dados, 2)
+                if col in COLUNAS_PERCENTUAL:
+                    linha_media[col.strip()] = f"{media:.2f}%"
+                else:
+                    if media == int(media):
+                        linha_media[col.strip()] = int(media)
+                    else:
+                        # Remove zeros desnecessários
+                        linha_media[col.strip()] = f'{round(media, 2):g}'
             else:
                 linha_media[col.strip()] = '—'
         linhas.append(linha_media)
